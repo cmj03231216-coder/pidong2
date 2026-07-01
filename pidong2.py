@@ -168,10 +168,25 @@ def analyze_and_highlight(text, check_mode):
             else:
                 form = '었' if form in ['았', '었', '였'] else '어'
 
+        # 💡 [핵심 패치] 이/히/리/기 + 어지다 (예: 먹히어지다) 이중 피동 완벽 탐지
         if i < len(tokens) - 1 and tag == 'EC' and form in ['어', '아', '여'] and tokens[i + 1].tag == 'VX' and tokens[i + 1].form == '지':
             j_vowel = form 
             prev_form = tokens[i-1].form if i > 0 else ""
             prev_tag = tokens[i-1].tag if i > 0 else ""
+            
+            # '어지다' 이전의 진짜 동사 뿌리(어간)를 복원합니다.
+            prev_verb_stem = ""
+            ti = i - 1
+            while ti >= 0 and tokens[ti].tag in ['VV', 'VA', 'VX', 'XSV', 'XSA']:
+                prev_verb_stem = tokens[ti].form + prev_verb_stem
+                ti -= 1
+
+            is_double_passive_dict = False
+            if TEACHER_API_KEY and prev_verb_stem:
+                # 뿌리 단어(예: 먹히다)가 사전에 이미 '피동사'로 등록되어 있는지 확인!
+                plist = check_dict_api(prev_verb_stem + "다")
+                if '피동사' in plist:
+                    is_double_passive_dict = True
             
             is_ha_verb = last_verb_stem.endswith('하') or last_verb_stem.endswith('해') or prev_form.endswith('하') or prev_form.endswith('해')
             is_adj = last_verb_tag in ['VA', 'XSA'] or prev_tag in ['VA', 'XSA']
@@ -185,10 +200,23 @@ def analyze_and_highlight(text, check_mode):
                 display_html.append(PASSIVE_COLOR.format(text=f"-{j_vowel}지다(비문)"))
                 if check_mode in ['passive', 'all']:
                     error_msg += "🚨 '-하다'로 끝나는 말은 '-해지다(하여지다)' 대신 '-되다'를 쓰는 것이 자연스럽습니다. (예: 사용해지다 ❌ -> 사용되다 ⭕)\n\n"
-            elif is_double:
-                display_html.append(PASSIVE_COLOR.format(text=f"-{j_vowel}지다(이중피동)"))
+            
+            # 💡 [요청 사항 반영] 이중 피동 발견 시 "노란색 주의(warning_msg)" 처리하여 저장은 허용함!
+            elif is_double_passive_dict:
+                found_passive = True # 저장을 위해 피동으로 인정해 줌
+                display_html.append(PASSIVE_COLOR.format(text=f"-{j_vowel}지다(이중피동 주의)").replace("#ffcccc", "#ffe6cc"))
                 if check_mode in ['passive', 'all']:
-                    error_msg += "🚨 '-되다'에 '-어지다'가 또 붙은 '이중 피동'입니다. 하나만 사용하세요.\n\n"
+                    wrong_word = prev_verb_stem + j_vowel + "지다"
+                    correct_word = prev_verb_stem + "다"
+                    warning_msg += f"💡 '{correct_word}'는 이미 피동사인데 '-어지다'가 불필요하게 또 붙은 '이중 피동'입니다. 국어 문법상 틀린 표현이니 '{correct_word}'로 고치는 것을 강력히 추천합니다! (일단 저장은 가능합니다)\n\n"
+                mark_highlight([tokens[i], tokens[i+1]], (255, 230, 153))
+            
+            elif is_double:
+                found_passive = True # 저장을 위해 피동으로 인정해 줌
+                display_html.append(PASSIVE_COLOR.format(text=f"-{j_vowel}지다(이중피동 주의)").replace("#ffcccc", "#ffe6cc"))
+                if check_mode in ['passive', 'all']:
+                    warning_msg += "💡 '-되다'에 '-어지다'가 또 붙은 '이중 피동'입니다. 국어 문법상 틀린 표현이니 고치는 것을 추천합니다! (일단 저장은 가능합니다)\n\n"
+                mark_highlight([tokens[i], tokens[i+1]], (255, 230, 153))
             else:
                 found_passive = True
                 display_html.append(PASSIVE_COLOR.format(text=f"-{j_vowel}지다(피동)"))
@@ -204,9 +232,11 @@ def analyze_and_highlight(text, check_mode):
                 if check_mode in ['passive', 'all']:
                     error_msg += "🚨 '-하다'로 끝나는 말은 '-해지다(하여지다)' 대신 '-되다'를 쓰는 것이 자연스럽습니다. (예: 사용해지다 ❌ -> 사용되다 ⭕)\n\n"
             elif root.endswith('되') or root.endswith('되어') or root.endswith('돼'):
-                display_html.append(f"{root}- + " + PASSIVE_COLOR.format(text=f"{jtext}(이중피동)"))
+                found_passive = True
+                display_html.append(f"{root}- + " + PASSIVE_COLOR.format(text=f"{jtext}(이중피동 주의)").replace("#ffcccc", "#ffe6cc"))
                 if check_mode in ['passive', 'all']:
-                    error_msg += "🚨 '-되다'에 '-어지다'가 또 붙은 '이중 피동'입니다. 하나만 사용하세요.\n\n"
+                    warning_msg += "💡 '-되다'에 '-어지다'가 또 붙은 '이중 피동'입니다. 고치는 것을 추천합니다! (일단 저장은 가능합니다)\n\n"
+                mark_highlight([tokens[i]], (255, 230, 153))
             else:
                 found_passive = True
                 display_html.append(f"{root}- + " + PASSIVE_COLOR.format(text=f"{jtext}(피동)"))
@@ -293,14 +323,27 @@ def analyze_and_highlight(text, check_mode):
         else: display_html.append(form)
         i += 1
 
+    # 💡 종합 텍스트 2중 강제 필터링 (텍스트 원본 기반 이중 피동 최후 방어선 -> warning_msg 로 전환!)
     if check_mode in ['passive', 'all']:
         if re.search(r'(되|돼)(어지|어져|어진|어질|어짐|어집|어지고|어지니|어지면)', text.replace(" ", "")):
-            if "이중 피동" not in error_msg:
-                error_msg += "🚨 '-되다'에 '-어지다'가 또 붙은 '이중 피동'입니다. 하나만 사용하세요. (예: 사용되어진다 ❌ -> 사용된다 ⭕)\n\n"
+            if "이중 피동" not in warning_msg:
+                warning_msg += "💡 '-되다'에 '-어지다'가 또 붙은 '이중 피동'입니다. 문법상 틀린 표현이니 고치는 것을 추천합니다! (일단 저장은 가능합니다)\n\n"
+                found_passive = True
+                
+        # 먹혀지다, 잊혀지다 등 강제 체크망
+        double_passive_patterns = ['먹혀지', '보여지', '쓰여지', '잊혀지', '읽혀지', '잡혀지', '닫혀지', '열려지', '팔려지', '풀려지', '들려지', '쫓겨지', '찢겨지', '안겨지', '담겨지', '끊겨지', '나뉘어지', '바뀌어지']
+        for dp in double_passive_patterns:
+            if dp in text.replace(" ", ""):
+                if "이중 피동" not in warning_msg:
+                    warning_msg += f"💡 '{dp}다'는 이미 사전에 등록된 피동사인데 '-어지다'가 불필요하게 또 붙은 '이중 피동'입니다. 문법상 틀린 표현이니 고치는 것을 추천합니다! (일단 저장은 가능합니다)\n\n"
+                    found_passive = True
+                break
+                
         if re.search(r'(해지|하여지|해져|하여져|해진|하여진|해질|하여질|해짐|하여짐)', text.replace(" ", "")):
             if "자연스럽습니다" not in error_msg and "상태 변화" not in error_msg:
                 error_msg += "🚨 '-하다'로 끝나는 동사는 '-해지다(하여지다)' 대신 '-되다'를 쓰는 것이 자연스럽습니다. (예: 사용해지다 ❌ -> 사용되다 ⭕)\n\n"
 
+    # 💡 warning_msg(주의)는 아무리 많아도 error_msg(에러)가 없으면 최종 통과(is_passed = True)됩니다!
     if check_mode == 'passive' and not found_passive: error_msg += "🚨 올바른 피동 표현이 발견되지 않았습니다.\n\n"
     elif check_mode == 'quote' and not found_quote: error_msg += "🚨 인용 표현이 발견되지 않았습니다.\n\n"
     elif check_mode == 'all':
@@ -482,7 +525,6 @@ with right_col:
                 if rq1: q_intents.append("현장성/생생함 전달")
                 if rq2: q_intents.append("신뢰성/객관성 부여")
                 
-                # 💡 파일명 복구 완료!
                 png_data = create_final_png(team_name, st.session_state.right_content, highlight_indices, p_intents, q_intents)
                 safe_team = team_name.strip() if team_name.strip() else "모둠"
                 

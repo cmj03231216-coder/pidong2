@@ -67,7 +67,6 @@ def get_korean_font(size=20):
     font_path = "NanumGothic.ttf"
     if not os.path.exists(font_path):
         try:
-            # 서버에 폰트가 없으면 자동으로 다운로드
             urllib.request.urlretrieve("https://github.com/google/fonts/raw/main/ofl/nanumgothic/NanumGothic-Regular.ttf", font_path)
         except Exception: pass
     try:
@@ -75,7 +74,6 @@ def get_korean_font(size=20):
     except:
         return ImageFont.load_default()
 
-# --- 4. 💡 [오류 수정 완료] 이미지 생성기 (형광펜 색칠 기능 완벽 복구) ---
 def create_final_png(team_name, content, highlight_indices, p_intents, q_intents):
     img = Image.new("RGB", (800, 750), color=(255, 255, 255))
     draw = ImageDraw.Draw(img)
@@ -101,21 +99,18 @@ def create_final_png(team_name, content, highlight_indices, p_intents, q_intents
     draw.text((40, y_pos), "📝 [최종 윤리 홍보문]", fill=(0, 102, 204), font=fsub)
     y_pos += 40
     
-    # 💡 텍스트를 한 글자씩 그리면서 형광펜을 칠하는 로직 복구
     x = 40
     line_height = 32
     for idx, char in enumerate(content):
         if char == '\n':
             x = 40; y_pos += line_height; continue
             
-        # 안전한 글자 너비 측정 (에러 방지)
         try: char_w = fbody.getlength(char)
         except: char_w = draw.textlength(char, font=fbody)
             
         if x + char_w > 760:
             x = 40; y_pos += line_height
             
-        # 형광펜 배경색 칠하기
         bg_color = highlight_indices.get(idx, None)
         if bg_color:
             draw.rectangle([x, y_pos-2, x+char_w, y_pos+line_height+2], fill=bg_color)
@@ -129,7 +124,6 @@ def create_final_png(team_name, content, highlight_indices, p_intents, q_intents
     img.save(img_byte_arr, format='PNG')
     return img_byte_arr.getvalue()
 
-# --- 5. 분석 및 하이라이트 핵심 엔진 ---
 def analyze_and_highlight(text, check_mode):
     if not text.strip(): return False, "문장을 입력해 주세요.", [], "", "", {}
     
@@ -163,7 +157,6 @@ def analyze_and_highlight(text, check_mode):
             last_verb_stem = form
             last_verb_tag = tag
 
-        # [모음조화 교정]
         if tag in ['EP', 'EC', 'EF'] and form in ['았', '었', '였', '아', '어', '여']:
             prev_form = tokens[i-1].form if i > 0 else ""
             if prev_form.endswith('하'):
@@ -175,7 +168,6 @@ def analyze_and_highlight(text, check_mode):
             else:
                 form = '었' if form in ['았', '었', '였'] else '어'
 
-        # [-아/어/여지다 검사]
         if i < len(tokens) - 1 and tag == 'EC' and form in ['어', '아', '여'] and tokens[i + 1].tag == 'VX' and tokens[i + 1].form == '지':
             j_vowel = form 
             prev_form = tokens[i-1].form if i > 0 else ""
@@ -232,7 +224,6 @@ def analyze_and_highlight(text, check_mode):
             mark_highlight([tokens[i]], (255, 204, 204))
             i += 1; continue
 
-        # [사동사 필터링]
         if tag.startswith('V') and len(form) >= 2 and form[-1] in ['이', '히', '리', '기']:
             root, suffix = form[:-1], form[-1]
             bword = form + "다"
@@ -269,7 +260,6 @@ def analyze_and_highlight(text, check_mode):
                 
             i += 1; continue
 
-        # [인용 표현]
         is_indirect = False
         if tag == 'EC' and form in ['다고', '자고', '냐고']:
             is_indirect = True
@@ -303,7 +293,6 @@ def analyze_and_highlight(text, check_mode):
         else: display_html.append(form)
         i += 1
 
-    # 종합 텍스트 2중 강제 필터링 
     if check_mode in ['passive', 'all']:
         if re.search(r'(되|돼)(어지|어져|어진|어질|어짐|어집|어지고|어지니|어지면)', text.replace(" ", "")):
             if "이중 피동" not in error_msg:
@@ -470,7 +459,6 @@ with right_col:
         elif not st.session_state.right_content.strip():
             st.warning("최종 종합 문구를 입력해 주세요!")
         else:
-            # 💡 수정 포인트: 하이라이트 인덱스(highlight_indices) 정상적으로 받기!
             is_pass, html_str, bases, err, warn, highlight_indices = analyze_and_highlight(st.session_state.right_content, 'all')
             
             st.markdown("#### 🏆 최종 모둠 결과서 점검")
@@ -494,13 +482,14 @@ with right_col:
                 if rq1: q_intents.append("현장성/생생함 전달")
                 if rq2: q_intents.append("신뢰성/객관성 부여")
                 
-                # 💡 수정 포인트: 파라미터 5개 정상적으로 묶어서 전달!
+                # 💡 파일명 복구 완료!
                 png_data = create_final_png(team_name, st.session_state.right_content, highlight_indices, p_intents, q_intents)
+                safe_team = team_name.strip() if team_name.strip() else "모둠"
                 
                 st.download_button(
                     label="💾 갤러리에 저장하기 (PNG 이미지)", 
                     data=png_data, 
-                    file_name="final_report.png", # 깨짐 없는 영문 파일명 적용
+                    file_name=f"최종_홍보물_{safe_team}.png", 
                     mime="image/png",
                     type="primary"
                 )

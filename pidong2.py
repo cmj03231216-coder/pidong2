@@ -75,12 +75,38 @@ def get_korean_font(size=20):
     except:
         return ImageFont.load_default()
 
+# 💡 [핵심 패치] 글 길이에 따라 도화지 세로 길이를 자동으로 쭉쭉 늘려주는 스마트 렌더링 엔진!
 def create_final_png(team_name, content, highlight_indices, p_intents, q_intents):
-    img = Image.new("RGB", (800, 750), color=(255, 255, 255))
-    draw = ImageDraw.Draw(img)
     ftitle, fsub, fbody = get_korean_font(28), get_korean_font(20), get_korean_font(18)
+    line_height = 32
     
-    draw.rectangle([(20, 20), (780, 730)], outline=(100, 100, 100), width=3)
+    # 1. 텍스트가 얼마나 길어질지 미리 가상으로 길이를 재봅니다. (Dry Run)
+    temp_img = Image.new("RGB", (1, 1))
+    temp_draw = ImageDraw.Draw(temp_img)
+    y_pos_dry = 150 + 35 + 30 + 50 + 25 + 40 # 본문 시작 예상 위치
+    x_dry = 40
+    
+    for char in content:
+        if char == '\n':
+            x_dry = 40; y_pos_dry += line_height; continue
+            
+        try: char_w = fbody.getlength(char)
+        except: char_w = temp_draw.textlength(char, font=fbody)
+            
+        if x_dry + char_w > 760:
+            x_dry = 40; y_pos_dry += line_height
+        x_dry += char_w
+        
+    # 기본 길이(750)와 글이 길어졌을 때 필요한 길이 중 큰 값을 선택합니다. (하단 여백 120 확보)
+    final_height = max(750, int(y_pos_dry) + 120)
+
+    # 2. 미리 계산한 길이에 맞춰 진짜 도화지를 넓게 폅니다!
+    img = Image.new("RGB", (800, final_height), color=(255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    
+    # 테두리도 늘어난 길이에 맞춰서 그어줍니다.
+    draw.rectangle([(20, 20), (780, final_height - 20)], outline=(100, 100, 100), width=3)
+    
     draw.text((40, 40), "🏆 AI 윤리문 모둠 최종 결과물", fill=(30, 30, 30), font=ftitle)
     draw.text((40, 95), f"모둠명: {team_name}", fill=(50, 50, 200), font=fsub)
     draw.line([(40, 130), (760, 130)], fill=(0, 0, 0), width=2)
@@ -101,7 +127,6 @@ def create_final_png(team_name, content, highlight_indices, p_intents, q_intents
     y_pos += 40
     
     x = 40
-    line_height = 32
     for idx, char in enumerate(content):
         if char == '\n':
             x = 40; y_pos += line_height; continue
@@ -119,7 +144,8 @@ def create_final_png(team_name, content, highlight_indices, p_intents, q_intents
         draw.text((x, y_pos), char, fill=(0,0,0), font=fbody)
         x += char_w
     
-    draw.text((40, 690), "* 본 결과물은 AI 윤리문 작성 프로그램을 통해 검증 완료되었습니다.", fill=(150, 150, 150), font=get_korean_font(14))
+    # 꼬리말도 잘리지 않게 도화지 제일 밑바닥 쪽으로 자동 이동!
+    draw.text((40, final_height - 60), "* 본 결과물은 AI 윤리문 작성 프로그램을 통해 검증 완료되었습니다.", fill=(150, 150, 150), font=get_korean_font(14))
     
     img_byte_arr = io.BytesIO()
     img.save(img_byte_arr, format='PNG')
@@ -219,25 +245,18 @@ def analyze_and_highlight(text, check_mode):
                 mark_highlight([tokens[i], tokens[i+1]], (255, 204, 204))
             i += 2; continue
 
-        # 💡 [핵심 패치] '가지다', '만지다' 등 원래 '지'로 끝나는 일반 동사 오작동 완벽 방지!
         if tag.startswith('V') and form.endswith('지') and len(form) >= 2:
             bword = form + "다"
             
             is_pure_general_verb = False
-            
-            # 1. 자주 쓰이는 평범한 일반 동사들 하드코딩
             if form in ['가지', '만지', '던지', '번지', '뒤지', '터지', '퍼지', '빠지', '미끄러지', '쓰러지', '떨어지', '부서지', '무너지', '자빠지', '엎어지']:
                 is_pure_general_verb = True
-                
-            # 2. 확실한 '어지다' 계열 형태가 아닐 경우 사전 검증으로 피동 여부 철저 확인
             elif not re.search(r'([아어여해돼져워켜혀쳐려며겨벼]지)$', form):
                 if TEACHER_API_KEY:
                     plist = check_dict_api(bword)
-                    # 사전에 등재되어 있고 피동사가 아니라면 일반 단어로 취급
                     if len(plist) > 0 and '피동사' not in plist:
                         is_pure_general_verb = True
                         
-            # 일반 동사로 판별되면, 에러나 피동 꼬리표 없이 조용히 글자만 표시하고 패스!
             if is_pure_general_verb:
                 display_html.append(f"{form}-")
                 i += 1

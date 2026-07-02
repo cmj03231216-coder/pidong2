@@ -33,7 +33,7 @@ kiwi = load_kiwi()
 PASSIVE_COLOR = "<span style='background-color: #ffcccc; padding: 2px 4px; border-radius: 4px; font-weight: bold;'>{text}</span>"
 DIRECT_COLOR = "<span style='background-color: #cce5ff; padding: 2px 4px; border-radius: 4px; font-weight: bold;'>{text}</span>"
 INDIRECT_COLOR = "<span style='background-color: #d4edda; padding: 2px 4px; border-radius: 4px; font-weight: bold;'>{text}</span>"
-CAUSATIVE_COLOR = "<span style='background-color: #e2e3e5; padding: 2px 4px; border-radius: 4px; font-weight: bold;'>{text}</span>" # 💡 사동사용 회색 추가
+CAUSATIVE_COLOR = "<span style='background-color: #e2e3e5; padding: 2px 4px; border-radius: 4px; font-weight: bold;'>{text}</span>"
 
 def check_dict_api(word):
     if not TEACHER_API_KEY: return []
@@ -250,7 +250,7 @@ def analyze_and_highlight(text, check_mode):
             mark_highlight([tokens[i]], (255, 204, 204))
             i += 1; continue
 
-        # 💡 [핵심 패치] 이/히/리/기 사동사 처리 로직 완화
+        # 💡 [핵심 패치] 이/히/리/기 검증 로직 완벽 수정 (퍼트리다 등 일반 단어 분리)
         if tag.startswith('V') and len(form) >= 2 and form[-1] in ['이', '히', '리', '기']:
             root, suffix = form[:-1], form[-1]
             bword = form + "다"
@@ -266,10 +266,9 @@ def analyze_and_highlight(text, check_mode):
                 is_causative = '사동사' in plist
                 is_passive = '피동사' in plist
                 
-                # 💡 수정됨: 사동사만 있는 경우 에러(error_msg)를 띄우지 않고, 단순 정보(회색 태그)만 추가하여 통과를 방해하지 않음!
                 if is_causative and not is_passive:
                     display_html.append(f"{root}- + " + CAUSATIVE_COLOR.format(text=f"-{suffix}-(사동사)"))
-                    mark_highlight([tokens[i]], (226, 227, 229)) # 옅은 회색 하이라이트
+                    mark_highlight([tokens[i]], (226, 227, 229)) 
                     base_forms.append({"word": bword, "valid": plist, "type": "접사_사동사"})
                 elif is_causative and is_passive:
                     found_passive = True
@@ -278,11 +277,15 @@ def analyze_and_highlight(text, check_mode):
                         warning_msg += f"💡 '{bword}'는 문맥에 따라 피동/사동이 모두 가능합니다. 주체가 '당하는' 상황이 맞는지 확인해 보세요! 어려우면 선생님께 도움을 요청한 후 저장하세요.\n\n"
                     mark_highlight([tokens[i]], (255, 230, 153))
                     base_forms.append({"word": bword, "valid": plist, "type": "접사피동_둘다"})
-                else:
+                elif is_passive:
                     found_passive = True
                     display_html.append(f"{root}- + " + PASSIVE_COLOR.format(text=f"-{suffix}-(피동 접사)"))
                     mark_highlight([tokens[i]], (255, 204, 204))
                     base_forms.append({"word": bword, "valid": plist, "type": "접사피동_피동"})
+                else:
+                    # 💡 여기가 '퍼트리다', '내리다', '달리다' 등 사동사도 피동사도 아닌 일반 동사들이 걸러지는 곳입니다!
+                    # 일반 동사이기 때문에 형광펜이나 경고 없이 그냥 조용히 글자만 출력합니다.
+                    display_html.append(f"{form}-") 
                 
             i += 1; continue
 
@@ -337,7 +340,6 @@ def analyze_and_highlight(text, check_mode):
             if "자연스럽습니다" not in error_msg and "상태 변화" not in error_msg:
                 error_msg += "🚨 '-하다'로 끝나는 동사는 '-해지다(하여지다)' 대신 '-되다'를 쓰는 것이 자연스럽습니다. (예: 사용해지다 ❌ -> 사용되다 ⭕)\n\n"
 
-    # 💡 최종 점검: 사동사가 섞여 있어도 "피동사가 최소 1개 있으면" 여기서 에러가 발생하지 않고 무사 통과됩니다!
     if check_mode == 'passive' and not found_passive: error_msg += "🚨 올바른 피동 표현이 발견되지 않았습니다.\n\n"
     elif check_mode == 'quote' and not found_quote: error_msg += "🚨 인용 표현이 발견되지 않았습니다.\n\n"
     elif check_mode == 'all':
@@ -350,9 +352,8 @@ def analyze_and_highlight(text, check_mode):
         plist = b.get('valid', [])
         b_type = b.get('type', '')
         
-        # 💡 사전 링크 하단 상태 메시지도 부드럽게 수정
         if b_type == '접사_사동사':
-            b['is_correct'] = True # 에러 처리 안 함
+            b['is_correct'] = True 
             b['status_msg'] = "ℹ️ 사동사 (참고용)"
         elif b_type == '접사피동_둘다':
             b['is_correct'] = True
@@ -376,7 +377,6 @@ def render_base_form_links(bases):
     links = []
     for b in bases:
         w, msg = b['word'], b['status_msg']
-        # 상태에 맞게 글자 색깔 지정
         color = "green" if "✅" in msg else ("#0066cc" if "ℹ️" in msg else ("#ff9900" if "⚠️" in msg or "💡" in msg else "red"))
         links.append(f"<a href='https://stdict.korean.go.kr/search/searchResult.do?pageSize=10&searchKeyword={urllib.parse.quote(w)}' target='_blank' style='text-decoration:none;'>🔍 <b>{w}</b></a> <span style='color:{color}; font-weight:bold;'>({msg})</span>")
     return "👉 [단어 사전에서 보기]: " + " | ".join(links)

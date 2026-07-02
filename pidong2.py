@@ -219,7 +219,30 @@ def analyze_and_highlight(text, check_mode):
                 mark_highlight([tokens[i], tokens[i+1]], (255, 204, 204))
             i += 2; continue
 
+        # 💡 [핵심 패치] '가지다', '만지다' 등 원래 '지'로 끝나는 일반 동사 오작동 완벽 방지!
         if tag.startswith('V') and form.endswith('지') and len(form) >= 2:
+            bword = form + "다"
+            
+            is_pure_general_verb = False
+            
+            # 1. 자주 쓰이는 평범한 일반 동사들 하드코딩
+            if form in ['가지', '만지', '던지', '번지', '뒤지', '터지', '퍼지', '빠지', '미끄러지', '쓰러지', '떨어지', '부서지', '무너지', '자빠지', '엎어지']:
+                is_pure_general_verb = True
+                
+            # 2. 확실한 '어지다' 계열 형태가 아닐 경우 사전 검증으로 피동 여부 철저 확인
+            elif not re.search(r'([아어여해돼져워켜혀쳐려며겨벼]지)$', form):
+                if TEACHER_API_KEY:
+                    plist = check_dict_api(bword)
+                    # 사전에 등재되어 있고 피동사가 아니라면 일반 단어로 취급
+                    if len(plist) > 0 and '피동사' not in plist:
+                        is_pure_general_verb = True
+                        
+            # 일반 동사로 판별되면, 에러나 피동 꼬리표 없이 조용히 글자만 표시하고 패스!
+            if is_pure_general_verb:
+                display_html.append(f"{form}-")
+                i += 1
+                continue
+
             root = form[:-1]
             jtext = "-여지다" if root.endswith('하') else ("-아지다" if is_yang_vowel(root) else "-어지다")
             
@@ -250,7 +273,6 @@ def analyze_and_highlight(text, check_mode):
             mark_highlight([tokens[i]], (255, 204, 204))
             i += 1; continue
 
-        # 💡 [핵심 패치] 이/히/리/기 검증 로직 완벽 수정 (퍼트리다 등 일반 단어 분리)
         if tag.startswith('V') and len(form) >= 2 and form[-1] in ['이', '히', '리', '기']:
             root, suffix = form[:-1], form[-1]
             bword = form + "다"
@@ -283,8 +305,6 @@ def analyze_and_highlight(text, check_mode):
                     mark_highlight([tokens[i]], (255, 204, 204))
                     base_forms.append({"word": bword, "valid": plist, "type": "접사피동_피동"})
                 else:
-                    # 💡 여기가 '퍼트리다', '내리다', '달리다' 등 사동사도 피동사도 아닌 일반 동사들이 걸러지는 곳입니다!
-                    # 일반 동사이기 때문에 형광펜이나 경고 없이 그냥 조용히 글자만 출력합니다.
                     display_html.append(f"{form}-") 
                 
             i += 1; continue

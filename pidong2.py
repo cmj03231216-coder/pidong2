@@ -33,6 +33,7 @@ kiwi = load_kiwi()
 PASSIVE_COLOR = "<span style='background-color: #ffcccc; padding: 2px 4px; border-radius: 4px; font-weight: bold;'>{text}</span>"
 DIRECT_COLOR = "<span style='background-color: #cce5ff; padding: 2px 4px; border-radius: 4px; font-weight: bold;'>{text}</span>"
 INDIRECT_COLOR = "<span style='background-color: #d4edda; padding: 2px 4px; border-radius: 4px; font-weight: bold;'>{text}</span>"
+CAUSATIVE_COLOR = "<span style='background-color: #e2e3e5; padding: 2px 4px; border-radius: 4px; font-weight: bold;'>{text}</span>" # 💡 사동사용 회색 추가
 
 def check_dict_api(word):
     if not TEACHER_API_KEY: return []
@@ -168,13 +169,11 @@ def analyze_and_highlight(text, check_mode):
             else:
                 form = '었' if form in ['았', '었', '였'] else '어'
 
-        # 💡 [핵심 패치] 이/히/리/기 + 어지다 (예: 먹히어지다) 이중 피동 완벽 탐지
         if i < len(tokens) - 1 and tag == 'EC' and form in ['어', '아', '여'] and tokens[i + 1].tag == 'VX' and tokens[i + 1].form == '지':
             j_vowel = form 
             prev_form = tokens[i-1].form if i > 0 else ""
             prev_tag = tokens[i-1].tag if i > 0 else ""
             
-            # '어지다' 이전의 진짜 동사 뿌리(어간)를 복원합니다.
             prev_verb_stem = ""
             ti = i - 1
             while ti >= 0 and tokens[ti].tag in ['VV', 'VA', 'VX', 'XSV', 'XSA']:
@@ -183,7 +182,6 @@ def analyze_and_highlight(text, check_mode):
 
             is_double_passive_dict = False
             if TEACHER_API_KEY and prev_verb_stem:
-                # 뿌리 단어(예: 먹히다)가 사전에 이미 '피동사'로 등록되어 있는지 확인!
                 plist = check_dict_api(prev_verb_stem + "다")
                 if '피동사' in plist:
                     is_double_passive_dict = True
@@ -200,10 +198,8 @@ def analyze_and_highlight(text, check_mode):
                 display_html.append(PASSIVE_COLOR.format(text=f"-{j_vowel}지다(비문)"))
                 if check_mode in ['passive', 'all']:
                     error_msg += "🚨 '-하다'로 끝나는 말은 '-해지다(하여지다)' 대신 '-되다'를 쓰는 것이 자연스럽습니다. (예: 사용해지다 ❌ -> 사용되다 ⭕)\n\n"
-            
-            # 💡 [요청 사항 반영] 이중 피동 발견 시 "노란색 주의(warning_msg)" 처리하여 저장은 허용함!
             elif is_double_passive_dict:
-                found_passive = True # 저장을 위해 피동으로 인정해 줌
+                found_passive = True 
                 display_html.append(PASSIVE_COLOR.format(text=f"-{j_vowel}지다(이중피동 주의)").replace("#ffcccc", "#ffe6cc"))
                 if check_mode in ['passive', 'all']:
                     wrong_word = prev_verb_stem + j_vowel + "지다"
@@ -212,7 +208,7 @@ def analyze_and_highlight(text, check_mode):
                 mark_highlight([tokens[i], tokens[i+1]], (255, 230, 153))
             
             elif is_double:
-                found_passive = True # 저장을 위해 피동으로 인정해 줌
+                found_passive = True 
                 display_html.append(PASSIVE_COLOR.format(text=f"-{j_vowel}지다(이중피동 주의)").replace("#ffcccc", "#ffe6cc"))
                 if check_mode in ['passive', 'all']:
                     warning_msg += "💡 '-되다'에 '-어지다'가 또 붙은 '이중 피동'입니다. 국어 문법상 틀린 표현이니 고치는 것을 추천합니다! (일단 저장은 가능합니다)\n\n"
@@ -254,6 +250,7 @@ def analyze_and_highlight(text, check_mode):
             mark_highlight([tokens[i]], (255, 204, 204))
             i += 1; continue
 
+        # 💡 [핵심 패치] 이/히/리/기 사동사 처리 로직 완화
         if tag.startswith('V') and len(form) >= 2 and form[-1] in ['이', '히', '리', '기']:
             root, suffix = form[:-1], form[-1]
             bword = form + "다"
@@ -269,12 +266,11 @@ def analyze_and_highlight(text, check_mode):
                 is_causative = '사동사' in plist
                 is_passive = '피동사' in plist
                 
+                # 💡 수정됨: 사동사만 있는 경우 에러(error_msg)를 띄우지 않고, 단순 정보(회색 태그)만 추가하여 통과를 방해하지 않음!
                 if is_causative and not is_passive:
-                    display_html.append(f"{root}- + " + PASSIVE_COLOR.format(text=f"-{suffix}-(사동사/오답)").replace("#ffcccc", "#ffb3b3"))
-                    if check_mode in ['passive', 'all']:
-                        error_msg += f"🚨 '{bword}'는 누군가에게 행동을 시키는 '사동사'입니다. 당하는 '피동 표현'으로 수정하세요! (예: 남기다 ❌)\n\n"
-                    mark_highlight([tokens[i]], (255, 180, 180))
-                    base_forms.append({"word": bword, "valid": plist, "type": "접사피동_사동"})
+                    display_html.append(f"{root}- + " + CAUSATIVE_COLOR.format(text=f"-{suffix}-(사동사)"))
+                    mark_highlight([tokens[i]], (226, 227, 229)) # 옅은 회색 하이라이트
+                    base_forms.append({"word": bword, "valid": plist, "type": "접사_사동사"})
                 elif is_causative and is_passive:
                     found_passive = True
                     display_html.append(f"{root}- + " + PASSIVE_COLOR.format(text=f"-{suffix}-(피동/사동 주의)").replace("#ffcccc", "#ffe6cc"))
@@ -323,14 +319,12 @@ def analyze_and_highlight(text, check_mode):
         else: display_html.append(form)
         i += 1
 
-    # 💡 종합 텍스트 2중 강제 필터링 (텍스트 원본 기반 이중 피동 최후 방어선 -> warning_msg 로 전환!)
     if check_mode in ['passive', 'all']:
         if re.search(r'(되|돼)(어지|어져|어진|어질|어짐|어집|어지고|어지니|어지면)', text.replace(" ", "")):
             if "이중 피동" not in warning_msg:
                 warning_msg += "💡 '-되다'에 '-어지다'가 또 붙은 '이중 피동'입니다. 문법상 틀린 표현이니 고치는 것을 추천합니다! (일단 저장은 가능합니다)\n\n"
                 found_passive = True
                 
-        # 먹혀지다, 잊혀지다 등 강제 체크망
         double_passive_patterns = ['먹혀지', '보여지', '쓰여지', '잊혀지', '읽혀지', '잡혀지', '닫혀지', '열려지', '팔려지', '풀려지', '들려지', '쫓겨지', '찢겨지', '안겨지', '담겨지', '끊겨지', '나뉘어지', '바뀌어지']
         for dp in double_passive_patterns:
             if dp in text.replace(" ", ""):
@@ -343,7 +337,7 @@ def analyze_and_highlight(text, check_mode):
             if "자연스럽습니다" not in error_msg and "상태 변화" not in error_msg:
                 error_msg += "🚨 '-하다'로 끝나는 동사는 '-해지다(하여지다)' 대신 '-되다'를 쓰는 것이 자연스럽습니다. (예: 사용해지다 ❌ -> 사용되다 ⭕)\n\n"
 
-    # 💡 warning_msg(주의)는 아무리 많아도 error_msg(에러)가 없으면 최종 통과(is_passed = True)됩니다!
+    # 💡 최종 점검: 사동사가 섞여 있어도 "피동사가 최소 1개 있으면" 여기서 에러가 발생하지 않고 무사 통과됩니다!
     if check_mode == 'passive' and not found_passive: error_msg += "🚨 올바른 피동 표현이 발견되지 않았습니다.\n\n"
     elif check_mode == 'quote' and not found_quote: error_msg += "🚨 인용 표현이 발견되지 않았습니다.\n\n"
     elif check_mode == 'all':
@@ -355,9 +349,11 @@ def analyze_and_highlight(text, check_mode):
     for b in base_forms:
         plist = b.get('valid', [])
         b_type = b.get('type', '')
-        if b_type == '접사피동_사동':
-            b['is_correct'] = False
-            b['status_msg'] = "❌ 사동사 (피동 아님)"
+        
+        # 💡 사전 링크 하단 상태 메시지도 부드럽게 수정
+        if b_type == '접사_사동사':
+            b['is_correct'] = True # 에러 처리 안 함
+            b['status_msg'] = "ℹ️ 사동사 (참고용)"
         elif b_type == '접사피동_둘다':
             b['is_correct'] = True
             b['status_msg'] = "⚠️ 피동/사동 주의 (문맥 확인)"
@@ -380,7 +376,8 @@ def render_base_form_links(bases):
     links = []
     for b in bases:
         w, msg = b['word'], b['status_msg']
-        color = "green" if "✅" in msg else ("#ff9900" if "⚠️" in msg or "💡" in msg else "red")
+        # 상태에 맞게 글자 색깔 지정
+        color = "green" if "✅" in msg else ("#0066cc" if "ℹ️" in msg else ("#ff9900" if "⚠️" in msg or "💡" in msg else "red"))
         links.append(f"<a href='https://stdict.korean.go.kr/search/searchResult.do?pageSize=10&searchKeyword={urllib.parse.quote(w)}' target='_blank' style='text-decoration:none;'>🔍 <b>{w}</b></a> <span style='color:{color}; font-weight:bold;'>({msg})</span>")
     return "👉 [단어 사전에서 보기]: " + " | ".join(links)
 
